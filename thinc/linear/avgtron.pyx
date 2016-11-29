@@ -75,12 +75,14 @@ cdef class AveragedPerceptron:
         cdef Writer writer = Writer(loc, self.weights.length)
         cdef feat_t key
         cdef size_t feat_addr
+        cdef int i = 0
         for i, (key, feat_addr) in enumerate(self.weights.items()):
             if feat_addr != 0:
                 writer.write(key, <SparseArrayC*>feat_addr)
             if i % 1000 == 0:
                 PyErr_CheckSignals()
         writer.close()
+        print("linear/avgtron.pyx: {} weights dumped".format(i))
 
     def load(self, loc):
         cdef feat_t feat_id
@@ -93,6 +95,24 @@ cdef class AveragedPerceptron:
             if i % 1000 == 0:
                 PyErr_CheckSignals()
             i += 1
+
+    def loadx(self, loc):
+        cdef feat_t feat_id
+        cdef SparseArrayC* feature
+        cdef Reader reader = Reader(loc)
+        self.weights = PreshMap(reader.nr_feat)
+        self.averages = PreshMap(reader.nr_feat)
+        cdef int i = 0
+        cdef int j = 0
+        while reader.read(self.mem, &feat_id, &feature):
+            j = 0
+            while feature[j].key >= 0:
+                self.update_weight(feat_id, feature[j].key, feature[j].val)
+                j += 1
+            if i % 1000 == 0:
+                PyErr_CheckSignals()
+            i += 1
+        print("linear/avgtron.pyx: {} weights loaded from {}".format(i, loc))
 
     def end_training(self):
         cdef feat_id
@@ -118,7 +138,7 @@ cdef class AveragedPerceptron:
         # * weights_table: ~9 million entries
         # * n_feats: ~200
         # * scores: ~80 classes
-        # 
+        #
         # I think the bottle-neck is actually reading the weights from main memory.
         cdef const MapStruct* weights_table = self.weights.c_map
         cdef int i, j
@@ -156,7 +176,7 @@ cdef class AveragedPerceptron:
             feat.times = SparseArray.init(clas, <weight_t>self.time)
             self.averages.set(feat_id, feat)
             self.weights.set(feat_id, feat.curr)
-        else:  
+        else:
             i = SparseArray.find_key(feat.curr, clas)
             if i < 0:
                 feat.curr = SparseArray.resize(feat.curr)
